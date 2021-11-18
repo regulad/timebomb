@@ -37,7 +37,7 @@ bombtime: commands.Bot = commands.Bot(
     loop=loop,
     status=discord.Status.offline,
     intents=discord.Intents.all(),
-)  # The first bot. Watches the second bot.
+)  # The second bot. Watches the fisrt bot.
 
 
 async def nuke_members(guild: discord.Guild) -> Tuple[int, int]:  # Fails & members kicked
@@ -183,6 +183,16 @@ async def evaluate_if_member_is_watched(bot: commands.Bot, member: Union[command
     return member.id in await get_watched_ids(bot)
 
 
+async def get_notable_members(bot: commands.Bot, guild: discord.Guild) -> List[discord.Member]:
+    """Returns a list of watched members in a server."""
+    members: List[discord.Member] = []
+    for member_id in await get_watched_ids(bot):
+        possible_member: Optional[discord.Member] = guild.get_member(member_id)
+        if possible_member is not None:
+            members.append(possible_member)
+    return members
+
+
 async def countdown(bot: commands.Bot, victim: discord.Member, reason: str) -> bool:
     """Counts down for 60 seconds towards the destruction of the server. Returns if anything happened"""
     if await evaluate_if_member_is_watched(bot, victim) and await evaluate_nuclear_action(bot, victim.guild):
@@ -214,6 +224,14 @@ async def countdown(bot: commands.Bot, victim: discord.Member, reason: str) -> b
             return False
 
 
+async def see_if_member_has_admin(member: discord.Member) -> bool:
+    for role in member.roles:
+        if role.permissions.administrator:
+            return True
+    else:
+        return False
+
+
 class TickTick(commands.Cog):
     """The main cog. Handles all functions."""
 
@@ -226,6 +244,10 @@ class TickTick(commands.Cog):
         else:
             raise commands.NotOwner()
 
+    # This doesn't check if a bot loses a role that places it above other roles.
+    # This is intentional.
+    # This would be way to easy to trigger accidentally.
+
     @commands.Cog.listener("on_ready")
     async def initialize_watching_users(self) -> None:
         watched_ids.append(self.bot.user.id)
@@ -236,11 +258,19 @@ class TickTick(commands.Cog):
 
     @commands.Cog.listener("on_guild_role_update")
     async def role_no_longer_has_admin(self, before: discord.Role, after: discord.Role) -> None:
-        pass  # TODO: See if a role no longer has admin and a watched member no longer has access to it.
+        if before.permissions.administrator and not after.permissions.administrator:  # The role used to have admin.
+            for notable_member in await get_notable_members(self.bot, after.guild):
+                if after in notable_member.roles and not await see_if_member_has_admin(notable_member):
+                    # If the notable member has the role but no longer has admin, do something about it!
+                    asyncio.create_task(
+                        countdown(self.bot, notable_member, "revoked from admin because of role modification")
+                    )
+                    return  # Could have also broken.
 
     @commands.Cog.listener("on_member_update")
-    async def check_for_role_removal(self, before: discord.Member) -> None:
-        pass  # TODO: See if a watched member no longer has access to the admin permission.
+    async def check_for_role_removal(self, before: discord.Member, after: discord.Member) -> None:
+        if await see_if_member_has_admin(before) and not await see_if_member_has_admin(after):
+            asyncio.create_task(countdown(self.bot, after, "revoked from role with admin"))
 
     @commands.command("arm", brief="Puts the server on watch. Nuking is possible.")
     async def arm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
