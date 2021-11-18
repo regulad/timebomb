@@ -1,6 +1,7 @@
 version: '3'
 services:
   peppercord:
-    image: ghcr.io/regulad/docker-discord-template:latest  # TODO: replace this with your package name
+    image: ghcr.io/regulad/timebomb:latest
     environment:
-      - TOKEN=YOUR_TOKEN
+      - TOKEN1=YOUR_TOKEN
+      - TOKEN2=YOUR_SECOND_TOKEN
