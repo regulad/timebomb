@@ -1,6 +1,6 @@
 version: '3'
 services:
-  peppercord:
+  timebomb:
     image: ghcr.io/regulad/timebomb:latest
     environment:
       - TOKEN1=YOUR_TOKEN
