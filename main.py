@@ -161,13 +161,13 @@ class TickTick(commands.Cog):
 
     # TODO: See if a server has done something that might be nukable.
 
-    @commands.command("arm")
+    @commands.command("arm", brief="Puts the server on watch. Nuking is possible.")
     @commands.guild_only()
     async def arm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
         pass  # TODO: Add the server to the nukable list.
 
-    @commands.command("disarm")
+    @commands.command("disarm", brief="Removes the server from watch. Nuking is not possible.")
     @commands.guild_only()
     async def disarm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
