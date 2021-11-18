@@ -169,7 +169,7 @@ class TickTick(commands.Cog):
 
     @commands.command("disarm")
     @commands.guild_only()
-    async def disarm(self, ctx: commands.Contextt, *, guild: Optional[discord.Guild]) -> None:
+    async def disarm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
         guild: discord.Guild = guild or ctx.guild
         pass  # TODO: Remove the server from the nukable list
 
