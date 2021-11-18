@@ -154,7 +154,7 @@ async def evaluate_nuclear_action(intruder: discord.Member, guild: discord.Guild
 class TickTick(commands.Cog):
     """The main cog. Handles all functions."""
     async def cog_check(self, ctx: commands.Context) -> bool:
-        if ctx.bot.is_owner(ctx.author):
+        if await ctx.bot.is_owner(ctx.author):
             return True
         else:
             raise commands.NotOwner()
