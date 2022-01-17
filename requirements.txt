@@ -1,2 +1,2 @@
 discord.py[voice, speed]@git+https://github.com/Rapptz/discord.py.git@master
-# GitPython  # Optional
+discord-webhook-logger >=1.1.1, <2
