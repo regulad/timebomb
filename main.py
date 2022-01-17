@@ -10,8 +10,14 @@ from typing import Optional, List, Tuple, Union
 
 import discord
 from discord.ext import commands
+from dislog import DiscordWebhookHandler
 
-loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+DESCRIPTION: str = "The clock is ticking. Do you choose to advance it?"
+STATUS: discord.Status = discord.Status.offline
+INTENTS: discord.Intents = discord.Intents(guilds=True, members=True)
+CHECK_EMOJI: str = "\U00002705"
+X_EMOJI: str = "\U0000274c"
+
 nukables: List[int] = []  # A list of servers that can be nuked. TODO: put this on a database?
 watched_ids: List[int] = [
     int(id_to_watch)
@@ -22,22 +28,6 @@ watched_ids: List[int] = [
         else []
     )
 ]
-
-timebomb: commands.Bot = commands.Bot(
-    command_prefix=os.environ.get("COMMAND_PREFIX", ">"),
-    description="The clock is ticking. Do you choose to advance it?",
-    loop=loop,
-    status=discord.Status.offline,
-    intents=discord.Intents.all(),
-)  # The first bot. Watches the second bot.
-
-bombtime: commands.Bot = commands.Bot(
-    command_prefix=os.environ.get("COMMAND_PREFIX", "<"),
-    description="The clock is ticking. Do you choose to advance it?",
-    loop=loop,
-    status=discord.Status.offline,
-    intents=discord.Intents.all(),
-)  # The second bot. Watches the fisrt bot.
 
 
 async def nuke_members(guild: discord.Guild) -> Tuple[int, int]:  # Fails & members kicked
@@ -246,7 +236,7 @@ class TickTick(commands.Cog):
 
     # This doesn't check if a bot loses a role that places it above other roles.
     # This is intentional.
-    # This would be way to easy to trigger accidentally.
+    # This would be way too easy to trigger accidentally.
 
     @commands.Cog.listener("on_ready")
     async def initialize_watching_users(self) -> None:
@@ -272,55 +262,80 @@ class TickTick(commands.Cog):
         if await see_if_member_has_admin(before) and not await see_if_member_has_admin(after):
             asyncio.create_task(countdown(self.bot, after, "revoked from role with admin"))
 
-    @commands.command("arm", brief="Puts the server on watch. Nuking is possible.")
+    @commands.command()
     async def arm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
+        """Puts the server on watch. Nuking is possible."""
         guild: discord.Guild = guild or ctx.guild
         if guild.id not in nukables:
             nukables.append(guild.id)
         await ctx.send("T-Minus as long as it takes.")
 
-    @commands.command("nuke", brief="Pull the trigger.")
     @commands.check(evaluate_nuclear_action)
     async def nuke(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
+        """Pull the trigger."""
         guild: discord.Guild = guild or ctx.guild
         message: discord.Message = await ctx.send(f"And so it begins. Continue?")
-        await message.add_reaction(emoji="\U00002705")
-        await message.add_reaction(emoji="\U0000274c")
+        await message.add_reaction(emoji=CHECK_EMOJI)
+        await message.add_reaction(emoji=X_EMOJI)
 
         def checkForReaction(reaction_object: discord.Reaction, user: Union[discord.Member, discord.User]):
             return (user.id == ctx.author.id) \
                    and (reaction_object.message == message) \
-                   and (str(reaction_object.emoji) in ["\U00002705", "\U0000274c"])
+                   and (str(reaction_object.emoji) in [CHECK_EMOJI, X_EMOJI])
 
         try:
             reaction: discord.Reaction = await ctx.bot.wait_for(event="reaction_add", check=checkForReaction,
                                                                 timeout=20.0)
         except asyncio.TimeoutError:
-            await message.clear_reaction(emoji="\U00002705")
-            await message.clear_reaction(emoji="\U0000274c")
+            await message.clear_reaction(emoji=CHECK_EMOJI)
+            await message.clear_reaction(emoji=X_EMOJI)
             await message.edit(content="Command timed out.")
             return
         else:
             await nuke(ctx.bot, guild)
 
-    @commands.command("disarm", brief="Removes the server from watch. Nuking is not possible.")
     @commands.check(evaluate_nuclear_action)
     async def disarm(self, ctx: commands.Context, *, guild: Optional[discord.Guild]) -> None:
+        """Removes the server from watch. Nuking is not possible."""
         guild: discord.Guild = guild or ctx.guild
         nukables.remove(guild.id)
         await ctx.send("It's over. For now.")
 
 
-timebomb.add_cog(TickTick(timebomb))
-bombtime.add_cog(TickTick(bombtime))
-
 if __name__ == "__main__":
+    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop_policy().new_event_loop()
+
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s:%(levelname)s:%(name)s: %(message)s"
     )
 
-    if not os.path.exists("config/"):
-        os.mkdir("config/")
+    maybe_webhook: Optional[str] = os.environ.get("DISLOG")
+
+    if maybe_webhook is not None:
+        logging.root.addHandler(DiscordWebhookHandler(maybe_webhook))
+
+    timebomb: commands.Bot = commands.Bot(
+        command_prefix=">",
+        description=DESCRIPTION,
+        loop=loop,
+        status=STATUS,
+        intents=INTENTS,
+        slash_commands=True,
+        message_commands=False,
+    )  # The first bot. Watches the second bot.
+
+    bombtime: commands.Bot = commands.Bot(
+        command_prefix="<",
+        description=DESCRIPTION,
+        loop=loop,
+        status=STATUS,
+        intents=INTENTS,
+        slash_commands=True,
+        message_commands=False,
+    )  # The second bot. Watches the first bot.
+
+    timebomb.add_cog(TickTick(timebomb))
+    bombtime.add_cog(TickTick(bombtime))
 
     timebomb_task: asyncio.Task = loop.create_task(timebomb.start(os.environ["TOKEN1"]))
     bombtime_task: asyncio.Task = loop.create_task(bombtime.start(os.environ["TOKEN2"]))
